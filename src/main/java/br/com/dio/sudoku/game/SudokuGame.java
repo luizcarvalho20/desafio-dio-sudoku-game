@@ -7,15 +7,20 @@ import br.com.dio.sudoku.util.BoardPrinter;
 import br.com.dio.sudoku.util.SudokuValidator;
 
 import java.util.Scanner;
+import java.util.Stack;
 
 public class SudokuGame {
 
     private final Board board = new Board();
     private final String[] args;
+
     private boolean started = false;
 
+    // histórico para desfazer última jogada
+    private final Stack<Move> history = new Stack<>();
+
     public SudokuGame(String[] args) {
-        this.args = args;
+        this.args = (args == null) ? new String[0] : args;
     }
 
     public void run() {
@@ -35,7 +40,12 @@ public class SudokuGame {
                 case "7" -> {
                     if (finishGame()) return;
                 }
-                default -> System.out.println("Opção inválida. Escolha de 1 a 7.\n");
+                case "8" -> undoLastMove();
+                case "0" -> {
+                    System.out.println("\nJogo encerrado pelo usuário. Até mais!");
+                    return;
+                }
+                default -> System.out.println("Opção inválida. Escolha uma opção do menu.\n");
             }
         }
     }
@@ -49,18 +59,22 @@ public class SudokuGame {
         System.out.println("5) Verificar status do jogo");
         System.out.println("6) Limpar (remover números do usuário)");
         System.out.println("7) Finalizar o jogo");
+        System.out.println("8) Desfazer última jogada");
+        System.out.println("0) Encerrar o jogo");
         System.out.print("Escolha: ");
     }
 
     // (1) iniciar novo jogo
     private void startNewGame() {
-        board.clearUserInputs(); // limpa entradas anteriores
-        // também zera tudo e aplica args (inclui fixos)
-        // para simplificar: recria fixos aplicando em cima do board atual
-        // (como fixos não podem ser apagados pelo clearUserInputs, este start funciona
-        // se você rodar o jogo pela primeira vez; se quiser reiniciar várias vezes,
-        // rode novamente o programa)
+        // limpa entradas anteriores do usuário
+        board.clearUserInputs();
+
+        // limpa histórico
+        history.clear();
+
+        // aplica valores iniciais pelos args
         ArgsParser.applyInitialSpaces(board, args);
+
         started = true;
 
         System.out.println("\nJogo iniciado com os valores passados por args!\n");
@@ -95,6 +109,9 @@ public class SudokuGame {
             return;
         }
 
+        // salva estado anterior para undo
+        history.push(new Move(col, row, space.getValue()));
+
         board.setUserValue(col, row, value);
         System.out.println("Número inserido.\n");
         BoardPrinter.print(board);
@@ -123,6 +140,9 @@ public class SudokuGame {
             System.out.println("Essa posição já está vazia.\n");
             return;
         }
+
+        // salva estado anterior para undo
+        history.push(new Move(col, row, space.getValue()));
 
         board.setUserValue(col, row, null);
         System.out.println("Número removido.\n");
@@ -156,6 +176,8 @@ public class SudokuGame {
         if (!ensureStarted()) return;
 
         board.clearUserInputs();
+        history.clear();
+
         System.out.println("Números do usuário removidos. Fixos mantidos.\n");
         BoardPrinter.print(board);
     }
@@ -181,6 +203,28 @@ public class SudokuGame {
         }
         System.out.println();
         return false;
+    }
+
+    // (8) desfazer última jogada
+    private void undoLastMove() {
+        if (!ensureStarted()) return;
+
+        if (history.isEmpty()) {
+            System.out.println("\nNão há jogadas para desfazer.\n");
+            return;
+        }
+
+        Move last = history.pop();
+
+        // se a posição for fixa (não deveria acontecer), apenas ignora
+        if (board.getSpace(last.col(), last.row()).isFixed()) {
+            System.out.println("\nNão é possível desfazer em uma posição fixa.\n");
+            return;
+        }
+
+        board.setUserValue(last.col(), last.row(), last.previousValue());
+        System.out.println("\nÚltima jogada desfeita.\n");
+        BoardPrinter.print(board);
     }
 
     private GameStatus getCurrentStatus() {
@@ -217,4 +261,3 @@ public class SudokuGame {
         }
     }
 }
-
