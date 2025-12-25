@@ -41,4 +41,4 @@ O projeto permite executar o jogo de **duas formas diferentes**:
 
 O modo terminal permite jogar o Sudoku diretamente pelo console.
 
-### Classe principal:
+
