@@ -3,261 +3,318 @@ package br.com.dio.sudoku.game;
 import br.com.dio.sudoku.board.Board;
 import br.com.dio.sudoku.board.Space;
 import br.com.dio.sudoku.util.ArgsParser;
-import br.com.dio.sudoku.util.BoardPrinter;
-import br.com.dio.sudoku.util.SudokuValidator;
+import br.com.dio.sudoku.game.SudokuValidator;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.Locale;
 import java.util.Scanner;
-import java.util.Stack;
 
 public class SudokuGame {
 
     private final Board board = new Board();
-    private final String[] args;
-
+    private final Scanner sc = new Scanner(System.in);
     private boolean started = false;
 
-    // histórico para desfazer última jogada
-    private final Stack<Move> history = new Stack<>();
+    // undo: guarda jogadas (col,row,valorAnterior,notasAnterior)
+    private final Deque<Move> history = new ArrayDeque<>();
 
     public SudokuGame(String[] args) {
-        this.args = (args == null) ? new String[0] : args;
+        ArgsParser.applyInitialSpaces(board, args);
     }
 
     public void run() {
-        Scanner sc = new Scanner(System.in);
-
         while (true) {
             printMenu();
-            String option = sc.nextLine().trim();
+            String op = readLine("Escolha uma opção: ");
 
-            switch (option) {
+            if (isQuit(op)) {
+                System.out.println("Encerrando... até mais!");
+                return;
+            }
+
+            switch (op) {
                 case "1" -> startNewGame();
-                case "2" -> placeNumber(sc);
-                case "3" -> removeNumber(sc);
+                case "2" -> placeNumber();
+                case "3" -> removeNumber();
                 case "4" -> viewGame();
-                case "5" -> checkStatus();
-                case "6" -> clearUserNumbers();
-                case "7" -> {
-                    if (finishGame()) return;
-                }
-                case "8" -> undoLastMove();
-                case "0" -> {
-                    System.out.println("\nJogo encerrado pelo usuário. Até mais!");
-                    return;
-                }
-                default -> System.out.println("Opção inválida. Escolha uma opção do menu.\n");
+                case "5" -> statusGame();
+                case "6" -> clearUser();
+                case "7" -> finishGame();
+                case "8" -> undoMove();
+                default -> System.out.println("Opção inválida.");
             }
         }
     }
 
     private void printMenu() {
-        System.out.println("===== SUDOKU (Terminal) =====");
-        System.out.println("1) Iniciar um novo jogo");
-        System.out.println("2) Colocar um novo número");
-        System.out.println("3) Remover um número");
-        System.out.println("4) Verificar jogo (visualizar tabuleiro)");
-        System.out.println("5) Verificar status do jogo");
-        System.out.println("6) Limpar (remover números do usuário)");
-        System.out.println("7) Finalizar o jogo");
-        System.out.println("8) Desfazer última jogada");
-        System.out.println("0) Encerrar o jogo");
-        System.out.print("Escolha: ");
+        System.out.println();
+        System.out.println("=== SUDOKU (Terminal) ===");
+        System.out.println("1. Iniciar novo jogo");
+        System.out.println("2. Colocar um novo número");
+        System.out.println("3. Remover um número");
+        System.out.println("4. Verificar jogo (mostrar tabuleiro)");
+        System.out.println("5. Verificar status do jogo");
+        System.out.println("6. Limpar (remove números do usuário, mantém fixos)");
+        System.out.println("7. Finalizar o jogo");
+        System.out.println("8. Voltar uma jogada (UNDO)");
+        System.out.println("0. Sair (a qualquer momento)");
+        System.out.println("Dica: digite 0, sair, exit ou quit quando quiser.");
+        System.out.println();
     }
 
-    // (1) iniciar novo jogo
     private void startNewGame() {
-        // limpa entradas anteriores do usuário
-        board.clearUserInputs();
-
-        // limpa histórico
-        history.clear();
-
-        // aplica valores iniciais pelos args
-        ArgsParser.applyInitialSpaces(board, args);
-
         started = true;
-
-        System.out.println("\nJogo iniciado com os valores passados por args!\n");
-        BoardPrinter.print(board);
+        history.clear();
+        System.out.println("Jogo iniciado!");
+        printBoard();
     }
 
-    // (2) colocar número
-    private void placeNumber(Scanner sc) {
+    private void placeNumber() {
         if (!ensureStarted()) return;
 
-        int value = readInt(sc, "Número (1-9): ");
-        int col = readInt(sc, "Índice horizontal (col 0-8): ");
-        int row = readInt(sc, "Índice vertical (row 0-8): ");
+        String numStr = readLine("Número (1-9) ou 0 para sair: ");
+        if (isQuit(numStr)) return;
 
-        if (!board.isInside(col, row)) {
-            System.out.println("Posição fora do tabuleiro.\n");
+        Integer value = parseInt(numStr);
+        if (value == null || value < 1 || value > 9) {
+            System.out.println("Número inválido.");
             return;
         }
-        if (value < 1 || value > 9) {
-            System.out.println("Número inválido. Use 1 a 9.\n");
+
+        Integer col = askIndex("Índice horizontal (col 0-8): ");
+        if (col == null) return;
+
+        Integer row = askIndex("Índice vertical (row 0-8): ");
+        if (row == null) return;
+
+        if (!board.isInside(col, row)) {
+            System.out.println("Posição fora do tabuleiro.");
             return;
         }
 
         Space space = board.getSpace(col, row);
-
         if (space.isFixed()) {
-            System.out.println("Essa posição é fixa (número inicial). Não pode alterar.\n");
+            System.out.println("Não pode alterar um número fixo.");
             return;
         }
         if (space.getValue() != null) {
-            System.out.println("Essa posição já está preenchida. Remova antes de colocar outro.\n");
+            System.out.println("Essa posição já está preenchida. Remova antes para trocar.");
             return;
         }
 
-        // salva estado anterior para undo
-        history.push(new Move(col, row, space.getValue()));
+        // salva estado anterior para UNDO
+        history.push(Move.from(col, row, space));
 
         board.setUserValue(col, row, value);
-        System.out.println("Número inserido.\n");
-        BoardPrinter.print(board);
+        printBoard();
+        warnIfConflict();
     }
 
-    // (3) remover número
-    private void removeNumber(Scanner sc) {
+    private void removeNumber() {
         if (!ensureStarted()) return;
 
-        int col = readInt(sc, "Índice horizontal (col 0-8): ");
-        int row = readInt(sc, "Índice vertical (row 0-8): ");
+        Integer col = askIndex("Índice horizontal (col 0-8) ou 0 para sair: ", true);
+        if (col == null) return;
+
+        Integer row = askIndex("Índice vertical (row 0-8) ou 0 para sair: ", true);
+        if (row == null) return;
 
         if (!board.isInside(col, row)) {
-            System.out.println("Posição fora do tabuleiro.\n");
+            System.out.println("Posição fora do tabuleiro.");
             return;
         }
 
         Space space = board.getSpace(col, row);
-
         if (space.isFixed()) {
-            System.out.println("Esse número é FIXO e não pode ser removido.\n");
+            System.out.println("Esse número é fixo e não pode ser removido.");
             return;
         }
 
         if (space.getValue() == null) {
-            System.out.println("Essa posição já está vazia.\n");
+            System.out.println("Essa posição já está vazia.");
             return;
         }
 
-        // salva estado anterior para undo
-        history.push(new Move(col, row, space.getValue()));
+        // salva para UNDO
+        history.push(Move.from(col, row, space));
 
         board.setUserValue(col, row, null);
-        System.out.println("Número removido.\n");
-        BoardPrinter.print(board);
+        printBoard();
+        warnIfConflict();
     }
 
-    // (4) visualizar
     private void viewGame() {
         if (!ensureStarted()) return;
-        BoardPrinter.print(board);
+        printBoard();
+        warnIfConflict();
     }
 
-    // (5) status + erros
-    private void checkStatus() {
+    private void statusGame() {
         if (!started) {
-            System.out.println("\nStatus: NÃO INICIADO");
-            System.out.println("Erros: NÃO (status não iniciado é sempre sem erro)\n");
+            System.out.println("Status: NÃO INICIADO (sempre sem erro).");
             return;
         }
 
-        GameStatus status = getCurrentStatus();
-        boolean hasErrors = SudokuValidator.hasConflicts(board);
+        boolean hasError = SudokuValidator.hasConflicts(board);
 
-        System.out.println("\nStatus: " + statusToPt(status));
-        System.out.println("Erros: " + (hasErrors ? "SIM (há conflitos)" : "NÃO"));
-        System.out.println();
+        String status;
+        if (board.isEmptyAllNonFixed()) status = "NÃO INICIADO";
+        else if (board.isFullyFilled()) status = "COMPLETO";
+        else status = "INCOMPLETO";
+
+        System.out.println("Status: " + status);
+        System.out.println("Erros: " + (hasError ? "SIM (há conflitos)" : "NÃO"));
     }
 
-    // (6) limpar entradas do usuário
-    private void clearUserNumbers() {
+    private void clearUser() {
+        if (!ensureStarted()) return;
+        board.clearUserInputs();
+        history.clear(); // limpa histórico porque já não faz sentido desfazer após limpar tudo
+        System.out.println("Números do usuário removidos (fixos mantidos).");
+        printBoard();
+    }
+
+    private void finishGame() {
         if (!ensureStarted()) return;
 
-        board.clearUserInputs();
-        history.clear();
+        if (!board.isFullyFilled()) {
+            System.out.println("Ainda existem espaços vazios. Preencha todos para finalizar.");
+            return;
+        }
 
-        System.out.println("Números do usuário removidos. Fixos mantidos.\n");
-        BoardPrinter.print(board);
+        if (SudokuValidator.hasConflicts(board)) {
+            System.out.println("O tabuleiro está completo, mas contém erros (conflitos). Corrija antes de finalizar.");
+            return;
+        }
+
+        System.out.println("Parabéns! Sudoku completo e válido ✅");
+        printBoard();
+        System.out.println("Jogo encerrado.");
+        System.exit(0);
     }
 
-    // (7) finalizar
-    private boolean finishGame() {
-        if (!ensureStarted()) return false;
-
-        GameStatus status = getCurrentStatus();
-        boolean hasErrors = SudokuValidator.hasConflicts(board);
-
-        if (status == GameStatus.COMPLETE && !hasErrors) {
-            System.out.println("\nParabéns! Sudoku completo e válido. Jogo encerrado ✅");
-            return true;
-        }
-
-        System.out.println("\nAinda não dá pra finalizar!");
-        if (status != GameStatus.COMPLETE) {
-            System.out.println("- Você precisa preencher todos os espaços.");
-        }
-        if (hasErrors) {
-            System.out.println("- O tabuleiro contém conflitos (erros).");
-        }
-        System.out.println();
-        return false;
-    }
-
-    // (8) desfazer última jogada
-    private void undoLastMove() {
+    private void undoMove() {
         if (!ensureStarted()) return;
 
         if (history.isEmpty()) {
-            System.out.println("\nNão há jogadas para desfazer.\n");
+            System.out.println("Nada para desfazer.");
             return;
         }
 
         Move last = history.pop();
+        Space space = board.getSpace(last.col, last.row);
 
-        // se a posição for fixa (não deveria acontecer), apenas ignora
-        if (board.getSpace(last.col(), last.row()).isFixed()) {
-            System.out.println("\nNão é possível desfazer em uma posição fixa.\n");
+        if (space.isFixed()) {
+            System.out.println("Não é possível desfazer em uma posição fixa (estranho, mas ok).");
             return;
         }
 
-        board.setUserValue(last.col(), last.row(), last.previousValue());
-        System.out.println("\nÚltima jogada desfeita.\n");
-        BoardPrinter.print(board);
+        // restaura valor anterior
+        board.setUserValue(last.col, last.row, last.prevValue);
+
+        // restaura notas anteriores (se você usar notas depois)
+        space.getNotes().clear();
+        space.getNotes().addAll(last.prevNotes);
+
+        System.out.println("Última jogada desfeita.");
+        printBoard();
+        warnIfConflict();
     }
 
-    private GameStatus getCurrentStatus() {
-        if (!started) return GameStatus.NOT_STARTED;
-        if (board.isFullyFilled()) return GameStatus.COMPLETE;
-        return GameStatus.INCOMPLETE;
-    }
-
-    private String statusToPt(GameStatus status) {
-        return switch (status) {
-            case NOT_STARTED -> "NÃO INICIADO";
-            case INCOMPLETE -> "INCOMPLETO";
-            case COMPLETE -> "COMPLETO";
-        };
-    }
+    // =========================
+    // Helpers
+    // =========================
 
     private boolean ensureStarted() {
         if (!started) {
-            System.out.println("\nVocê ainda não iniciou o jogo. Use a opção 1.\n");
+            System.out.println("Você ainda não iniciou o jogo. Use a opção 1.");
             return false;
         }
         return true;
     }
 
-    private int readInt(Scanner sc, String label) {
-        while (true) {
-            System.out.print(label);
-            String s = sc.nextLine().trim();
-            try {
-                return Integer.parseInt(s);
-            } catch (NumberFormatException e) {
-                System.out.println("Digite um número válido.\n");
+    private void warnIfConflict() {
+        if (SudokuValidator.hasConflicts(board)) {
+            System.out.println("⚠ Atenção: há conflitos no tabuleiro!");
+        }
+    }
+
+    private String readLine(String msg) {
+        System.out.print(msg);
+        String s = sc.nextLine();
+        return s == null ? "" : s.trim();
+    }
+
+    private boolean isQuit(String s) {
+        if (s == null) return false;
+        s = s.trim().toLowerCase(Locale.ROOT);
+        return s.equals("0") || s.equals("sair") || s.equals("exit") || s.equals("quit");
+    }
+
+    private Integer askIndex(String prompt) {
+        return askIndex(prompt, false);
+    }
+
+    private Integer askIndex(String prompt, boolean allowQuitZero) {
+        String s = readLine(prompt);
+        if (allowQuitZero && isQuit(s)) return null; // volta pro menu sem erro
+        if (isQuit(s)) return null;
+
+        Integer v = parseInt(s);
+        if (v == null || v < 0 || v > 8) {
+            System.out.println("Índice inválido. Use 0 a 8.");
+            return null;
+        }
+        return v;
+    }
+
+    private Integer parseInt(String s) {
+        try {
+            return Integer.parseInt(s.trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void printBoard() {
+        System.out.println();
+        System.out.println("    0 1 2   3 4 5   6 7 8");
+        System.out.println("  +-------+-------+-------+");
+        for (int row = 0; row < Board.SIZE; row++) {
+            System.out.print(row + " | ");
+            for (int col = 0; col < Board.SIZE; col++) {
+                Space space = board.getSpace(col, row);
+                String v = (space.getValue() == null) ? "." : String.valueOf(space.getValue());
+                System.out.print(v + " ");
+                if (col % 3 == 2) System.out.print("| ");
             }
+            System.out.println();
+            if (row % 3 == 2) {
+                System.out.println("  +-------+-------+-------+");
+            }
+        }
+        System.out.println();
+    }
+
+    // =========================
+    // Move (para UNDO)
+    // =========================
+    private static class Move {
+        final int col;
+        final int row;
+        final Integer prevValue;
+        final java.util.Set<Integer> prevNotes;
+
+        private Move(int col, int row, Integer prevValue, java.util.Set<Integer> prevNotes) {
+            this.col = col;
+            this.row = row;
+            this.prevValue = prevValue;
+            this.prevNotes = prevNotes;
+        }
+
+        static Move from(int col, int row, Space space) {
+            return new Move(col, row, space.getValue(), new java.util.HashSet<>(space.getNotes()));
         }
     }
 }
